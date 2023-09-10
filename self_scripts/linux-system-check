@@ -1,0 +1,252 @@
+#!/bin/bash
+
+# 生成时间戳，用于文件名
+timestamp=$(date +%Y%m%d%H%M%S)
+# 定义输出HTML文件名
+output_file="system_check_${timestamp}.html"
+# 定义输出文本文件名
+output_text="system_check_${timestamp}.txt"
+
+# 创建HTML文件头部
+create_html_header() {
+  cat <<EOF > "$output_file"
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <title>系统排查报告</title>
+  </head>
+  <body>
+    <h1>系统排查报告</h1>
+    <hr>
+EOF
+}
+
+# 结束HTML文件
+create_html_footer() {
+  cat <<EOF >> "$output_file"
+  </body>
+  </html>
+EOF
+}
+
+# 打印排查项的通用函数
+print_check_item() {
+  local title="$1"
+  local command_to_run="$2"
+  local code_to_print="$3"  # 添加要打印的代码
+  echo "<h2>$title</h2>" >> "$output_file"
+  echo "<pre>" >> "$output_file"
+  # 打印代码到HTML文件
+  echo "<code>$code_to_print</code><br><br>" >> "$output_file"
+  if eval "$command_to_run" >> "$output_file" 2>&1; then
+    echo "[*]检查成功 $code_to_print "
+  else
+    echo "[*]检查失败,请查看日志以获取详细信息 $code_to_print "
+  fi
+  echo "</pre>" >> "$output_file"
+}
+
+# 打印排查项到文本文件
+print_check_item_to_text() {
+  local title="$1"
+  local command_to_run="$2"
+  local code_to_print="$3"  # 添加要打印的代码
+  echo "########## $title ##########" >> "$output_text"
+  # 打印代码到文本文件
+  echo "### 命令 ###" >> "$output_text"
+  echo "$code_to_print" >> "$output_text"
+  if eval "$command_to_run" >> "$output_text" 2>&1; then
+    echo "[*]检查成功 $code_to_print "
+  else
+    echo "[*]检查失败,请查看日志以获取详细信息 $code_to_print "
+  fi
+}
+
+# 检查系统历史记录
+check_history() {
+  local code_to_print="cat \$HOME/.bash_history"
+  print_check_item "历史记录检查" "cat \$HOME/.bash_history" "$code_to_print"
+  print_check_item_to_text "历史记录检查" "cat \$HOME/.bash_history" "$code_to_print"
+}
+
+# 检查正在运行的进程
+check_processes() {
+  local code_to_print="ps aux"
+  print_check_item "进程检查" "ps aux" "$code_to_print"
+  print_check_item_to_text "进程检查" "ps aux" "$code_to_print"
+}
+
+# 检查开机自启服务
+check_startup_services() {
+  local code_to_print="systemctl list-units --type=service --state=enabled"
+  print_check_item "开机自启服务检查" "systemctl list-units --type=service --state=enabled" "$code_to_print"
+  print_check_item_to_text "开机自启服务检查" "systemctl list-units --type=service --state=enabled" "$code_to_print"
+}
+
+# 检查定时任务
+check_cron_jobs() {
+  local code_to_print="crontab -l"
+  print_check_item "定时任务检查" "crontab -l" "$code_to_print"
+  print_check_item_to_text "定时任务检查" "crontab -l" "$code_to_print"
+}
+
+# 检查登录记录
+check_login_records() {
+  local code_to_print="last"
+  print_check_item "登录记录检查" "last" "$code_to_print"
+  print_check_item_to_text "登录记录检查" "last" "$code_to_print"
+}
+check_successful_logins() {
+  local code_to_print=$(find_successful_logins)
+  print_check_item "登录成功ip查询" "$code_to_print" "(grep "Accepted" "$auth_log" | awk '{print $11}' | sort | uniq)"
+  print_check_item_to_text "登录成功ip查询" "$code_to_print" "(grep "Accepted" "$auth_log" | awk '{print $11}' | sort | uniq)"
+}
+find_successful_logins() {
+    # 判断系统类型
+    if [ -f /etc/os-release ]; then
+        source /etc/os-release
+        case $ID in
+            debian|ubuntu|kali)
+                log_paths=(
+                    "/var/log/auth.log"
+                    "/var/log/auth.log.1"
+                    "/var/log/syslog"
+                )
+                ;;
+            centos|rhel)
+                log_paths=(
+                    "/var/log/secure"
+                    "/var/log/secure.1"
+                )
+                ;;
+            *)
+                echo "未知或不受支持的系统类型: $ID"
+                exit 1
+                ;;
+        esac
+    elif [ -f /etc/redhat-release ]; then
+        log_paths=(
+            "/var/log/secure"
+            "/var/log/secure.1"
+        )
+    else
+        echo "无法确定系统类型"
+        exit 1
+    fi
+
+    auth_log=""
+
+    # 遍历备选项并检查日志文件是否存在
+    for path in "${log_paths[@]}"; do
+        if [ -f "$path" ]; then
+            auth_log="$path"
+            break
+        fi
+    done
+
+    # 检查是否找到认证日志文件
+    if [ -z "$auth_log" ]; then
+        echo "认证日志文件未找到"
+        exit 1
+    fi
+
+    # 提取登录成功的IP地址
+    successful_logins=$(grep "Accepted" "$auth_log" | awk '{print $11}' | sort | uniq)
+
+    # 显示结果
+    echo "成功登录的IP地址："
+    echo "$successful_logins"
+}
+# 执行额外的检查项
+extra_checks() {
+  echo "<h1>额外检查项</h1>" >> "$output_file"
+  echo "<pre>" >> "$output_file"
+
+  commands=("(cat /etc/os-release 2>/dev/null || cat /etc/redhat-release 2>/dev/null) && uname -a:系统与内核版本"
+            "free -h:内存使用情况"
+            "lscpu:系统概况"
+            "uptime:系统启动以来的运行时间"
+            "who && w:当前登录用户的信息"
+            "cat /etc/passwd:密码文件内容"
+            "stat /etc/shadow:Shadow文件属性"
+            "cat /etc/shadow:影子密码文件内容"
+            "cat /etc/sudoers:Sudo配置文件内容"
+            "lastlog:最后登录信息"
+            "ps -ef | grep pts:终端会话"
+            "history:Shell历史命令"
+            "chage -l root:Root用户密码策略"
+            "systemctl list-unit-files | grep 'enable':开机启动服务列表"
+            "cat /etc/crontab:系统Cron任务配置"
+            "cat /var/spool/cron/*:用户Cron任务"
+            "cat /etc/cron.d/*:Cron任务定义"
+            "cat /etc/cron.daily/*:每日Cron任务"
+            "cat /etc/cron.hourly/*:每小时Cron任务"
+            "cat /etc/cron.monthly/*:每月Cron任务"
+            "cat /etc/rc.local:系统启动脚本"
+            "cat /etc/cron.weekly/*:每周Cron任务"
+            "cat /etc/anacrontab:Anacron配置文件"
+            "cat /var/spool/anacron/*:Anacron任务执行日志"
+            "dpkg --verify || rpm -Va:检查安装的软件包的完整性"
+            "(cat /var/log/syslog 2>/dev/null || cat /var/log/messages 2>/dev/null):系统日志"
+            "(cat /var/log/auth.log 2>/dev/null || cat /var/log/secure 2>/dev/null):认证日志"
+            "cat /var/log/kern.log:内核日志"
+            "(cat /var/log/dpkg.log 2>/dev/null || cat /var/log/yum.log 2>/dev/null):软件包管理日志"
+            "(cat /var/log/nginx/access.log 2>/dev/null || cat /var/log/httpd/access_log 2>/dev/null):Nginx访问日志"
+            "(cat /var/log/nginx/error.log 2>/dev/null || cat /var/log/httpd/error_log 2>/dev/null):Nginx错误日志"
+            "cat /var/log/mysql/error.log 2>/dev/null:MySQL错误日志"
+            "cat /var/log/myapp.log 2>/dev/null:应用程序日志"
+            "cat /var/log/sysstat/sar 2>/dev/null:系统性能日志"
+            "cat /var/log/audit/audit.log 2>/dev/null:安全审计日志"
+            "cat /var/log/maillog 2>/dev/null:邮件服务器日志"
+            "cat /var/log/logrotate.log 2>/dev/null:日志旋转日志"
+            "cat /var/log/mycustomapp.log 2>/dev/null:自定义应用程序日志"
+            "cat /var/log/firewall.log 2>/dev/null:网络设备和防火墙日志"
+            "docker logs my_container 2>/dev/null:容器日志"
+            "cat /var/log/prometheus/prometheus.log 2>/dev/null:监控系统日志"
+            "cat /var/log/performance.log 2>/dev/null:应用程序性能日志")
+
+  for command_info in "${commands[@]}"; do
+    IFS=':' read -ra command_parts <<< "$command_info"
+    command_to_run="${command_parts[0]}"
+    command_title="${command_parts[1]}"
+    
+    # 调用print_check_item()函数生成HTML报告的条目
+    print_check_item "$command_title" "$command_to_run" "$command_to_run"
+
+    # 调用print_check_item_to_text()函数生成文本报告的条目
+    print_check_item_to_text "$command_title" "$command_to_run" "$command_to_run"
+  done
+  echo "</pre>" >> "$output_file"
+}
+
+
+# 主函数
+main() {
+  create_html_header
+  check_history
+  check_processes
+  check_startup_services
+  check_cron_jobs
+  check_login_records
+  # 在这里可以添加其他检查函数，如Webshell排查等
+  extra_checks
+  check_successful_logins
+  create_html_footer
+  # 获取HTML文件的绝对路径
+  absolute_path=$(realpath "$output_file")
+  echo "排查完成，结果已保存到 $(pwd)/$output_file"
+  echo "排查完成，结果已保存到 $(pwd)/$output_text"
+  
+  # 在系统默认浏览器中打开HTML文件
+  if command -v xdg-open > /dev/null; then
+    xdg-open "$output_file" &
+  elif command -v open > /dev/null; then
+    open "$output_file" &
+  else
+    echo "无法自动打开HTML文件，请手动打开：$absolute_path"
+  fi
+}
+
+# 调用主函数
+main
+
