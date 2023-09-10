@@ -71,11 +71,11 @@ python main.py
 
 * 仍然以D盾为例，这里选择手动执行单个程序
 
-![Ddun-c.png](./images/cc.png)
+![Ddun-c.png](./images/Ddun-c.png)
 
 *接下来会提示输入参数，由于启动D盾时候命令是固定的，所以不需要参数，直接回车就好，然后就会执行D盾程序的调用，接下来的操作与正常使用D盾软件没有区别。
 
-![Ddun.png](./images/Ddun.png)
+![Ddun.png](./images/cc.png)
 
 * 如果是自动执行多个程序，并且有参数时，这里以同时执行afrog与nmap为例
 
